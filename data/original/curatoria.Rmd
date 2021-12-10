@@ -1,0 +1,310 @@
+---
+title: "Encuesta_factorial_open"
+author: "Francisco Meneses"
+date: "16-08-2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introducción 
+
+El objetivo de este documento es preparar los datos de un estudi de dos olas para ser publicado. Esto consiste en un conjunto de tareas relativas a la evaluación de la calidad de los datos, la preparación, y la visualización de los mismos. 
+
+
+hay que consolidar solo una base de datos. Para ello se juntan ambas olas, se ordenan las variables, se agregan prefijos comunes a las variables relativas a la aplicación del documento y se eliminan aquellas variables que no entregan información.  
+
+
+
+```{r}
+library(sjlabelled)
+library(stringr)
+library(stringi)
+library(dplyr)
+library(datasets)
+library(data.table)
+library(tidyr)
+library(summarytools)
+library(sjPlot)
+library(stargazer)
+library(knitr)
+library(tidyverse)
+library(mice)
+library(texreg)
+library(lme4)
+library(sjmisc)
+library(tidyr)
+#library(sessioninfo) 
+```
+s
+# Cargar datos 
+
+El mayor problema de la base de datos es que tiene demasiadas variables lo que dificulta el uso.  
+
+```{r}
+# Importar datos
+library(haven)
+factorial_ola1 <- read_sav("factorial_ola1.sav")
+factorial_ola2 <- read_sav("factorial_ola2.sav")
+
+```
+
+# Crear variable de tratamiento
+```{r}
+factorial_ola1  = factorial_ola1 %>% mutate(experiment=case_when(FL_551_DO_Tratamiento_desigualdad==1 ~ "Tratamiento desigualdad",FL_551_DO_Tratamiento_pobreza ==1~"Tratamiento pobreza", FL_551_DO_Control==1~"Control cigarrillos"))
+
+
+factorial_ola1$experiment %>% is.na() %>% table() %>% prop.table()
+factorial_ola1$experiment %>% table() %>% prop.table()
+
+```
+
+
+# Eliminar variables
+
+*  temporizadores 
+
+* variables propias de qualtrics vacias 
+
+* información confidencial
+
+```{r}
+
+factorial_ola1 = factorial_ola1 %>% select(everything(),
+                                                      -starts_with("Q5"),-starts_with("FL"),
+                                                    -contains("IPAddress"),  # Estas variables se borran por etica
+                                                    -contains("LocationLatitude"), 
+                                                    -contains("LocationLongitude"),
+                                                    
+                                                    -contains("RecipientLastName"), # No contienen valores
+                                                    -contains("RecipientFirstName"),
+                                                    -contains("RecipientEmail"),
+                                                    -contains("ExternalReference"),
+                                                  
+                                                    -starts_with("time"),
+                                                  
+                                                                                     # Son constantes
+                                                    -contains("DistributionChannel"), # anonymous
+                                                    -contains("UserLanguage"),  # español (ES),
+                                                      
+                                                    )
+
+
+factorial_ola2 = factorial_ola2 %>% dplyr::select(everything(),
+                                                     -starts_with("Q5"),
+                                                    -starts_with("FL"),
+                                                    -contains("IPAddress"),  # Estas variables se borran por etica
+                                                    -contains("LocationLatitude"), 
+                                                    -contains("LocationLongitude"),
+                                                    
+                                                    -contains("RecipientLastName"), # No contienen valores
+                                                    -contains("RecipientFirstName"),
+                                                    -contains("RecipientEmail"),
+                                                    -contains("ExternalReference"),
+                                                  
+                                                    -starts_with("time"),
+                                                  
+                                                                                     # Son constantes
+                                                    -contains("DistributionChannel"), # anonymous
+                                                    -contains("UserLanguage"),  # español (ES),
+                                                      
+                                                    )
+
+# factorial_ola1$sal_just_ger_h %>% table() %>% prop.table()*100 # tengo dudas sobre si  es un experimento o factoral
+
+ 
+```
+
+
+
+## Ajustes a los datos antes de pasar a viñetas.
+
+
+
+```{r}
+library(dplyr)
+
+factorial_ola1$ID_respondente<- stringr::str_split_fixed(factorial_ola1$ticket,"_", 4)[,1] # En la variable ticket el primer código es el ID, todo lo demás se borra
+
+
+factorial_ola2$ID_respondente <- stringr::str_split_fixed(factorial_ola2$ticket,"_", 4)[,1] # En la variable ticket el primer código es el ID, todo lo demás se borra
+
+
+```
+
+
+### Eliminar casos inadecuados
+
+> Se eliminan a quienes no aceptan el concentimiento. Todas las demás variables son NA
+
+```{r}
+
+factorial_ola1$consen %>% table()
+factorial_ola1 = factorial_ola1 %>% filter(consen==1)
+
+factorial_ola2$consen %>% table()
+factorial_ola2 = factorial_ola2 %>% filter(consen==1)
+
+
+
+```
+
+
+
+
+### Agregar sufijos por tema 
+
+```{r}
+  
+# Se agrega prefijo al nombre de las preguntas de estatus subjetivo
+
+
+
+factorial_ola1= factorial_ola1 %>% rename(estsubj_hijos=hijos,
+                                          estsubj_familiar=familiar,
+                                          estsubj_ind_futu=ind_futu,
+                                          estsubj_ind_pas=ind_past)
+
+factorial_ola2= factorial_ola2 %>% rename(estsubj_hijos=hijos,
+                                          estsubj_familiar=familiar,
+                                          estsubj_ind_futu=ind_futu,
+                                          estsubj_ind_pas=ind_past)
+
+#
+factorial_ola1 %>%  find_var("gerente") 
+
+factorial_ola1$estsubj_hijos %>% str()
+
+```
+
+estsubj = como prefijo sifnifica estatus subjetivo.
+
+
+
+
+Hasta aqui tengo una base de datos que tiene identificadas las variables sgun .re .vig y _o1 y _o2
+
+
+
+  
+
+
+  > no estoy seguro si los taiming por ejemplo en la Q5838, son del bloque o de la pagina. Seria util que fuese del bloque por que hay preguntas que sino no tienen tiempos. 
+  
+  
+  
+# Juntar ola  
+```{r}
+factorial_ola2$ID_ticket<- stringr::str_split_fixed(factorial_ola2$ticket,"_", 4)[,1] # En la variable ticket el primer código es el ID, todo lo demás se borra
+
+factorial_ola2 = factorial_ola2 %>% filter(!duplicated(factorial_ola2$ID_ticket))
+
+factorial_ola1$ID_ticket<- stringr::str_split_fixed(factorial_ola1$ticket,"_", 4)[,1] # En la variable ticket el primer código es el ID, todo lo demás se borra
+
+factorial_ola1 = factorial_ola1 %>% filter(!duplicated(factorial_ola1$ID_ticket))
+
+
+
+factorial_o1o2 = left_join(factorial_ola1,factorial_ola2, by ="ID_ticket", suffix =c("_o1","_o2"))
+
+
+
+
+```
+
+```{r}
+# Esto expone el problema si se sacan los duplicated
+
+
+
+
+#(factorial_o1o2$ID_ticket) %>% table()  %>% table() # Aqui hay un problema, muchos id_ticket tienen más de 1, deberian tener 2 pero tienen 1.
+
+#(factorial_o1o2$ticket_o1) %>% table()  %>% table() # Aqui hay un problema, muchos id_ticket tienen más de 1, deberian tener 2 pero tienen 1.
+
+#(factorial_o1o2$ticket_o2) %>% table()  %>% table() # Aqui hay un problema, muchos id_ticket tienen más de 1, deberian tener 2 pero tienen 1.
+
+```
+
+# Mover factorial al final
+```{r}
+factorial_o1o2_p = factorial_o1o2 %>% select(ID_ticket, starts_with("p_"))
+
+factorial_o1o2 = factorial_o1o2 %>% select(-starts_with("p_"))
+
+factorial_o1o2 = left_join(factorial_o1o2,factorial_o1o2_p, by ="ID_ticket", suffix =c("_o1","_o2"))
+
+```
+
+
+```{r}
+#
+```
+
+
+# Exportar
+
+```{r, results='hide'}
+#sjPlot::view_df(vig_resp12,show.type = T,show.prc = T, show.frq = T, file="codebock.html")
+
+#save(vig_resp12, file="data.Rdata")
+
+#vig_resp12$FL_551_DO_Control.re
+```
+
+
+
+
+
+
+# 
+
+```{r}
+#sjPlot::view_df(factorial_o1o2,show.frq = T, encoding = "UTF-8")
+
+summarytools::dfSummary(factorial_o1o2,  plain.ascii  = FALSE,
+          style        = 'grid',
+          graph.magnif = 0.85,
+          varnumbers = FALSE,
+          valid.col    = FALSE,
+          max.tbl.height = 300,
+          tmp.img.dir  = "/tmp")  %>% print( method = "render")
+```
+
+# Eliminar  do 
+
+```{r}
+library(sjmisc)
+
+factorial_o1o2 %>%  find_var("Display Order") %>% select(var.name) %>% as.list() 
+
+
+factorial_o1o2=factorial_o1o2 %>% select(-contains("_DO_"))
+
+
+```
+ 
+
+# Exportar
+
+```{r, results='hide'}
+#sjPlot::view_df(vig_resp12,show.type = T,show.prc = T, show.frq = T, file="codebock.html")
+
+
+#data=factorial_o1o2
+
+#save(data, file="data_R.Rdata")
+  
+
+#library(haven)
+#write_sav(data, "data_SPSS.sav")
+
+#write.table(data, file="data_CSV.csv",sep=",",row.names=F)
+
+```
+
+
+
+
