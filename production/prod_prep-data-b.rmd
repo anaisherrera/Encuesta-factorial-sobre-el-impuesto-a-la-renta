@@ -110,7 +110,7 @@ deck_cod01<- c("FL_191_DO_","FL_193_DO_", # deck01
                "FL_146_DO_","FL_148_DO_", # deck04
                "FL_131_DO_","FL_133_DO_", # deck05
                "FL_116_DO_","FL_118_DO_", # deck06
-               "FL_101_DO_","FL_103_DO_",   # deck07
+               "FL_101_DO_","FL_103_DO_", # deck07
                "FL_86_DO_","FL_88_DO_",   # deck08
                "FL_71_DO_","FL_73_DO_",   # deck09
                "FL_56_DO_","FL_58_DO_")   # deck10
@@ -120,15 +120,11 @@ decks01<- data01 %>% select(ResponseId,"finished"=Finished,
                             starts_with("p_b_"),
                             matches(paste(deck_cod01, collapse="|")))
 
-
-
-
 for (i in deck_cod01) {
   names(decks01) <- names(decks01) %>% str_replace_all(pattern = i,replacement = "deck_vig") 
 }
 
 decks01<- remove_label(decks01)
-
 ```
 
 > La mediana de duración del cuestionario es **`r colorize(paste0(round(median(data01$Duration__in_seconds_/60),2)," minutos"),"red")` **  

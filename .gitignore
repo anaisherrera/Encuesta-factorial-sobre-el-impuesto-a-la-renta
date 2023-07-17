@@ -6,3 +6,6 @@ docs/prod_analysis_cache/*
 docs/prod_prep-data-a_cache/*
 docs/prod_prep-data-b_cache/*
 
+input/data/original/factorial_ola1.sav
+input/data/original/factorial_ola2.sav
+.Rproj.user

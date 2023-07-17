@@ -132,11 +132,13 @@ decks03[w] <- names(decks03)[w[,"col"]]
 
 ```{r}
 wide <- setDT(decks03)
-
+names(wide)
 long01<- melt(wide, id.vars = "ResponseId",
               variable.name = "wave",
               measure = patterns("^p_a_","^p_b_","deck_vig"),
-              value.name = c("taxperc","taxjust","deck_vig"));long01$wave <- NULL
+              value.name = c("taxperc","taxjust","deck_vig"))
+
+long01$wave <- NULL
 long01 <- na.omit(long01)
 long01$deck_vig  <- str_replace_all(long01$deck_vig,pattern = "deck_vig",replacement = "")
 ```

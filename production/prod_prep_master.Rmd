@@ -1,0 +1,141 @@
+---
+title: "Data preparation: Factorial taxes - wave 1"
+date: "`r format(Sys.time(), '%A %d %B %Y %X')`"
+css: "../input/css/custom.css"
+output:
+  bookdown::html_document2:
+    number_sections: true
+    toc: true
+    toc_float:
+      collapsed: false
+      toc_depth: 2
+    code_folding: "hide"
+editor_options:
+  chunk_output_type: console
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(warning = FALSE,message = FALSE, cache = TRUE,results = "hold")
+knitr::opts_knit$set(root.dir = "../")
+options(scipen=999)
+rm(list=ls())
+options(knitr.kable.NA = '')
+Sys.setlocale("LC_MESSAGES", 'es_CL.UTF-8')
+Sys.setenv(LANG = "es_CL.UTF-8")
+```
+
+```{r}
+if (!require("pacman")) install.packages("pacman")  #si falta pacman, instalar
+if (!require("tinytex")) install.packages("tinytex")#si falta tinytex, instalar
+pacman::p_load(tidyverse,haven,sjlabelled,stringi,sjPlot,sjmisc) # librerias
+
+tempR <- tempfile(fileext = ".R")
+knitr::purl(here::here("production/prod_prepw01.Rmd"), output=tempR)
+source(tempR)
+
+tempR <- tempfile(fileext = ".R")
+knitr::purl(here::here("production/prod_prepw02.Rmd"), output=tempR)
+source(tempR)
+# haven::write_dta(decks01,path = 'input/data/proc/decks.dta')
+```
+
+```{r}
+if (!require("pacman")) install.packages("pacman")  #si falta pacman, instalar
+if (!require("tinytex")) install.packages("tinytex")#si falta tinytex, instalar
+pacman::p_load(tidyverse,haven,sjlabelled,stringi,sjPlot,sjmisc) # librerias
+load(here::here("input/data/proc/vig_respw01.RData"))
+load(here::here("input/data/proc/vig_respw02.RData"))
+
+df1 <- 
+  vig_respw01 %>% 
+  mutate(wave="w1") %>% 
+  arrange(ticket) %>% 
+  select(ticket,starts_with("folio_encuestado"),respondeid,wave,everything())
+
+folios11<- data.frame(frq(df1$folio_encuestado_1))
+folios12<- data.frame(frq(df1$folio_encuestado_4))
+
+df2<- vig_respw02 %>% 
+  mutate(wave="w2") %>% 
+  arrange(ticket) %>% 
+  select(ticket,starts_with("folio_encuestado"),respondeid,wave,everything())
+
+folios21<- data.frame(frq(df1$folio_encuestado_1))
+folios22<- data.frame(frq(df1$folio_encuestado_4))
+
+table(df1$folio_encuestado_1 %in% df2$folio_encuestado_1)
+
+
+df_long <- rbind(df2,df1) %>% arrange(wave)
+
+table(df_long$folio_encuestado_1,df_long$wave)
+table(df_long$folio_encuestado_4,df_long$wave)
+
+frq_long<- data.frame(frq(df_long$folio_encuestado_1))
+table(frq_long$frq<=12) 
+table(frq_long$frq>12) 
+frq_long[frq_long$frq>12,]
+
+frq1<- na.omit(data.frame(frq(df_long$folio_encuestado[df_long$wave=="w1"])))
+frq2<- na.omit(data.frame(frq(df_long$folio_encuestado[df_long$wave=="w2"])))
+
+table(frq1$frq<=12) 
+table(frq1$frq>12) 
+frq1[frq1$frq>12,]
+
+table(frq2$frq<=12) 
+table(frq2$frq>12) 
+frq2[frq2$frq>12,]
+
+
+# dupl<- frq1[which(frq1$frq>12),]["val"]
+# vig_respw01 %>% filter(folio_encuestado %in% dupl$val) %>% arrange(folio_encuestado,respondeid) %>% View()
+# vig_respw02 %>% filter(folio_encuestado %in% dupl$val) %>% arrange(folio_encuestado,respondeid) %>% View()
+
+table1 <- 
+df_long %>% 
+  group_by(folio_encuestado_1,wave) %>% 
+  summarise(n=n()) %>% ungroup() %>% 
+  arrange(folio_encuestado_1)
+skimr::skim(table1)
+table2 <- 
+table1 %>%
+  pivot_wider(names_from = wave, values_from = n) %>% 
+  ungroup()
+skimr::skim(table2)
+folios<-  na.omit(table2)
+folios #casefolios present with response in vignettes in w1 and w2
+skimr::skim(folios) 
+folios<- folios$folio_encuestado_1
+
+# Funciones para renderizar tablas tanto en HTML como en pdf
+ if (!require("pacman")) install.packages("pacman")  #si falta pacman, instalar
+ if (!require("tinytex")) install.packages("tinytex")#si falta tinytex, instalar
+ pacman::p_load(dplyr,lme4,texreg,ggridges,MASS) # librerias
+load("input/data/proc/vig_respw01.RData")
+load("input/data/proc/vig_respw02.RData")
+
+df1 <- vig_respw01 %>% 
+  dplyr::select(respondeid,folio_encuestado_1,deck)
+
+
+df2 <- vig_respw02 %>% 
+  dplyr::select(respondeid,folio_encuestado_1,deck)
+df1_decks <- 
+df1 %>% group_by(folio_encuestado_1) %>% summarise(deck1=mean(deck)) 
+
+df2_decks <- 
+df2 %>% group_by(folio_encuestado_1) %>% summarise(deck2=mean(deck)) 
+
+df_decks <- left_join(df1_decks,df2_decks) %>% na.omit()
+df_decks$same_deck <- df_decks$deck1==df_decks$deck2
+dim(df_decks)
+table(df_decks$same_deck)
+df_decks[,c("folio_encuestado_1","same_deck")]
+
+df_long <- left_join(x = df_long,y = df_decks[,c("folio_encuestado_1","same_deck")],by ="folio_encuestado_1") 
+save(df_long,file = here::here("input/data/proc/df_longw1w2.RData"))
+save(folios,file = here::here("input/data/proc/foliosw1w2.RData"))
+```
+
+

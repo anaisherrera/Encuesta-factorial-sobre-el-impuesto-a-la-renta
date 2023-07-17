@@ -1,0 +1,453 @@
+---
+title: "Data preparation: Factorial taxes - wave 1"
+date: "`r format(Sys.time(), '%A %d %B %Y %X')`"
+css: "../input/css/custom.css"
+output:
+  bookdown::html_document2:
+    number_sections: true
+    toc: true
+    toc_float:
+      collapsed: false
+      toc_depth: 2
+    code_folding: "hide"
+editor_options:
+  chunk_output_type: console
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(warning = FALSE,message = FALSE, cache = TRUE,results = "hold")
+knitr::opts_knit$set(root.dir = "../")
+options(scipen=999)
+rm(list=ls())
+options(knitr.kable.NA = '')
+Sys.setlocale("LC_MESSAGES", 'es_CL.UTF-8')
+Sys.setenv(LANG = "es_CL.UTF-8")
+```
+
+```{r}
+ if (!require("pacman")) install.packages("pacman")  #si falta pacman, instalar
+ if (!require("tinytex")) install.packages("tinytex")#si falta tinytex, instalar
+ pacman::p_load(tidyverse,haven,sjlabelled,stringi,sjPlot) # librerias
+# load(file = "input/data/proc/factorial_ola1.RData")
+data01 <- read_spss(path = "input/data/original/factorial_ola2.sav")
+load(file = "input/data/proc/vig_dim.RData")
+data01 <- data01 %>% filter(consen==1) %>% data.frame()
+
+data01 %>% dplyr::select(FL_191_DO_11:FL_58_DO_1012) %>% names()
+
+deck_cod01<- c("FL_191_DO_","FL_193_DO_", #deck01
+               "FL_176_DO_","FL_178_DO_", #deck02
+               "FL_161_DO_","FL_163_DO_", #deck03
+               "FL_146_DO_","FL_148_DO_", #deck04
+               "FL_131_DO_","FL_133_DO_", #deck05
+               "FL_116_DO_","FL_118_DO_", #deck06
+               "FL_101_DO_ ","FL_103_DO_",#deck07
+               "FL_86_DO_","FL_88_DO_",   #deck08
+               "FL_71_DO_","FL_73_DO_",   #deck09
+               "FL_56_DO_","FL_58_DO_"    #deck10
+               )
+#  for checking and naming decks_vignettes:
+decks01<- data01 %>% dplyr::select(ResponseId,"finished"=Finished,
+                            starts_with("p_a_"),
+                            starts_with("p_b_"),
+                            matches(paste(deck_cod01, collapse="|")))
+# rename decks where:
+# example: deck_vig11 = Deck 01, Vignette 1
+for (i in deck_cod01) {
+  names(decks01) <- names(decks01) %>% str_replace_all(pattern = i,replacement = "deck_vig") 
+}
+
+decks01<- remove_label(decks01)
+
+# haven::write_dta(decks01,path = 'input/data/proc/decks.dta')
+```
+
+duplicated cases
+```{r}
+frq1 <- as.data.frame(frq(data01$ticket))
+
+tickets<- data01 %>% 
+  #check those cases with more than 1 cases (duplicates)
+  filter(ticket %in% filter(frq1,frq>1)$val) %>% 
+  select(ticket,ResponseId,RecordedDate,StartDate,EndDate,Progress) %>%
+  #keep cases with more than 50% of the survey
+  filter(Progress>50) %>% 
+  arrange(ticket) %>% 
+  data.frame()
+dim(tickets)
+frq2 <-
+    #check if after the filter there are still cases with more than 1
+data.frame(frq(tickets$ticket)) %>% 
+    #keep those cases that are still duplicated
+  filter(frq>1)
+
+tickets<- data01 %>% 
+  #keep the duplicated cases and check them
+  filter(ticket %in% frq2$val) %>% 
+  select(ticket,ResponseId,RecordedDate,StartDate,EndDate,Progress) %>% 
+  filter(Progress>50) %>% 
+  arrange(ticket) %>% 
+  data.table::as.data.table()
+dim(tickets)
+
+progress <- 
+tickets %>% group_by(ticket) %>% summarise(pmin=min(Progress,na.rm =T),
+                                           pmax=max(Progress,na.rm =T),
+                                           start_min=min(StartDate,na.rm =T),
+                                           start_max=max(StartDate,na.rm =T),
+                                           ) %>% arrange(pmax,pmin)
+
+#check those cases with the lower RecordedDate (earliest)
+tickets[tickets[, .I[which.min(RecordedDate)], by=ticket]$V1] 
+
+# these are tha cases that we want to delete from the data
+delete_ids<- as.character(tickets[tickets[, .I[which.min(RecordedDate)], by=ticket]$V1]$ResponseId )
+
+# Filter the data-----------------------------------------------------------
+dim(data01)
+data01_f <- 
+data01 %>% 
+  filter(Progress>50)
+table(data01$ResponseId %in% delete_ids)
+df1<- data.frame(frq(data01_f$ticket))
+data01_f <- 
+data01_f %>% 
+  filter(!ResponseId %in% delete_ids)
+dim(data01_f)
+
+data01 <- data01_f
+```
+
+> The median length of the questionnaire is **`r colorize(paste0(round(median(data01$Duration__in_seconds_/60),2)," minutos"),"red")` **  
+
+
+```{r}
+tiempo<- data01 %>% filter(Finished==1,Progress==100,!is.na(Q5231)) %>%
+  select(Duration__in_seconds_) %>% summarise(tiempo=median(Duration__in_seconds_/60))
+```
+
+> Excluding incomplete answers (finished= 0) the median length of the questionnaire is **`r colorize(paste0(round(tiempo,2)," minutos"),"red")` **  
+
+
+* We select the variables that identify the vignette and the deck to which it belongs.
+
+```{r}
+nam01<- decks01 %>% select(starts_with("deck_vig")) %>% names()
+decks02 <- data.frame(!is.na(decks01[nam01]))
+decks02$ResponseId <- decks01$ResponseId # add the responseID for merge
+table(is.na(decks02$ResponseId)) # no missing in ResponseID
+decks02[decks02==FALSE] <- NA # recorde FALSE as NA
+names(decks02)
+
+decks02 <- decks02 %>% filter(ResponseId %in% data01$ResponseId)
+
+# select deck01 with responsed for perceived and just income tax
+decks03 <- left_join(select(decks01,-nam01),decks02)
+names(decks03)
+
+# if deck03 is TRUE, inpute column name
+w <- which(decks03=="TRUE",arr.ind=TRUE) #the position of the coordinates
+decks03[w] <- names(decks03)[w[,"col"]]
+```
+
+- Database from wide to long
+
+```{r}
+library(tidyr)
+# Step 1: wide to long for perceived tax
+  # get the variable names for perception and each deck/vignette
+vars_perc<- decks03 %>% select(starts_with('p_a_')) %>% names()
+  # subset with each case and perception from 1 to 120 (number of vignettes)
+perc<- decks03 %>% select(ResponseId,starts_with('p_a_'))
+
+#pivot the data frame into a long format
+long_perc <- 
+perc %>% pivot_longer(cols=vars_perc,
+                    names_to='decks_vig_perc',
+                    values_to='perc') %>% 
+  arrange(decks_vig_perc)
+table(long_perc$perc=="") # FALSE = vignettes with no responses by desing
+long_perc$perc[long_perc$perc==""] <- NA #set responses in blank to NA
+
+long_perc$decks_vig_a <- 
+  str_replace_all(long_perc$decks_vig_perc,pattern = "p_a_",replacement = "")
+
+# create an common ID
+long_perc$ID <- paste0(long_perc$ResponseId,long_perc$decks_vig_a)
+
+# Step 2: wide to long for just tax
+  # get the variable names for just and each deck/vignette
+vars_just<- decks03 %>% select(starts_with('p_b_')) %>% names()
+  # subset with each case and just from 1 to 120 (number of vignettes)
+just<- decks03 %>% select(ResponseId,starts_with('p_b_'))
+
+#pivot the data frame into a long format
+long_just <- 
+just %>% pivot_longer(cols=vars_just,
+                    names_to='decks_vig_just',
+                    values_to='just') %>% 
+  arrange(decks_vig_just)
+table(long_just$just=="") # FALSE = vignettes with no responses by desing
+long_just$just[long_just$just==""] <- NA #set responses in blank to NA
+
+long_just$decks_vig_b <- 
+  str_replace_all(long_just$decks_vig_just,pattern = "p_b_",replacement = "")
+
+# create an common ID
+long_just$ID <- paste0(long_just$ResponseId,long_just$decks_vig_b)
+
+
+# Step 3: merge of perceived and just income tax
+table(long_just$ID==long_perc$ID) #all *must* be true 
+
+long <- left_join(x = long_perc,y = long_just,"ID") %>% 
+  select(ResponseId=ResponseId.x,
+         deck_vig=decks_vig_b,
+         taxperc=perc,
+         taxjust=just)
+long01<- na.omit(long)
+```
+
+- Recode perceived and fair tax variables
+
+```{r}
+long01$taxperc <- stri_replace_all(long01$taxperc, "", fixed=c("$")) #delete $ symbol
+long01$taxperc <- stri_replace_all(long01$taxperc, "", fixed=c(".")) #delete . 
+long01$taxperc <- as.numeric(long01$taxperc) # transform to numeric
+summary(long01$taxperc)
+table(long01$taxperc<0)
+long01$taxperc <- ifelse(long01$taxperc<0,yes = NA,long01$taxperc)
+summary(long01$taxperc)
+# sjmisc::frq(long01$taxperc)
+# sjPlot::plot_frq(long01$taxperc,type = 'density')
+
+long01$taxjust <- stri_replace_all(long01$taxjust, "", fixed=c("$")) #delete $ symbol
+long01$taxjust <- stri_replace_all(long01$taxjust, "", fixed=c(".")) #delete . 
+long01$taxjust <- as.numeric(long01$taxjust) # transform to numeric
+summary(long01$taxjust)
+table(long01$taxjust<0)
+long01$taxjust <- ifelse(long01$taxjust<0,yes = NA,long01$taxjust)
+summary(long01$taxjust)
+# sjmisc::frq(long01$taxjust)
+# sjPlot::plot_frq(long01$taxjust,type = 'density')
+```
+
+
+-  Merge respondents and vignettes
+
+```{r}
+# A) Merge sociodemographics from respondent to long base.
+long02<- 
+  left_join(long01,data01[,c("ticket","ResponseId","Finished","sexo","edad",
+                             "educ","ingresos",'cant_hogar',"act_prin","comuna",
+                             "merit_perc_effort","merit_perc_talent",
+                             "merit_pref_effort","merit_pref_talent")])  
+
+#select ID from ticket variable
+long02$folio_encuestado_1 <- stringr::str_split(long02$ticket,pattern = "_",simplify = T)[,1]
+long02$folio_encuestado_4 <- stringr::str_split(long02$ticket,pattern = "_",simplify = T)[,4]
+
+# B) Name respondent level variables
+long02<- 
+  long02 %>% 
+  rename("respondeid" = ResponseId, "sexo_re" = sexo, "edad_re" = edad, 
+         "educ_re" =educ, "ingresos_re" = ingresos,
+         pophome="cant_hogar",  
+         "estlab_re" = act_prin, 
+         "finished" = Finished) 
+
+# C) Naming vignette-level variables (generated in SAS)
+
+vig_dat<- vig_dat %>% rename("sexo_vig"=sexo,
+                             "apellido_vig"=apellido,
+                             "edad_vig"=edad,
+                             "nse_ori_vig"="nivel_socioeconómico_de_origen",
+                             "educ_vig"=nivel_educativo,
+                             "necesidades_vig"=necesidades,
+                             "educ_madre_vig"="educación_de_la_madre", 
+                             "ingresos_vig"=ingresos)
+
+
+# D) Merge bullet data to long base (respondent level + vignettes)
+vig_resp<- 
+  left_join(long02,vig_dat,by =c("deck_vig"))  %>%
+  select(starts_with("folio_encuestado"),respondeid,deck,id,deck_vig,everything(),-p1)  
+```
+
+- Variable label 
+
+```{r}
+vig_resp <- vig_resp %>% var_labels(respondeid = "Id Respondent",
+                                    finished="Finished survey",
+                                    deck = "Id Deck",
+                                    id = "Id Vignette",
+                                    deck_vig = "Id deck and vignette",
+                                    taxperc = "Perceived income tax",
+                                    taxjust = "Just income tax",
+                                    sexo_re = "Gender (respondent level)",
+                                    edad_re = "Age (respondent level)",
+                                    educ_re = "Education (respondent level)",
+                                    ingresos_re = "Income in CLP (respondent level)",
+                                    estlab_re = "Job status (respondent level)",
+                                    comuna = "Municipality (respondent level)",
+                                    sexo_vig = "Gender (vignette level)",
+                                    apellido_vig = "Etnicity - surname (vignette level)",
+                                    edad_vig = "Age (vignette level)",
+                                    nse_ori_vig = "SES of origin (vignette level)",
+                                    educ_vig = "Education (vignette level)",
+                                    necesidades_vig = "Needs - number of children (vignette level)",
+                                    educ_madre_vig = "Mother's education level (vignette level)",
+                                    ingresos_vig = "Income in CLP (vignette level)",
+                                    merit_perc_effort = "Perceived meritocracy"
+                                    )
+
+```
+
+- Value labels 
+
+```{r vignette}
+vig_resp$sexo_vig <- 
+  set_labels(vig_resp$sexo_vig,labels = c("Male"=1,"Female"=2))
+vig_resp$apellido_vig <- 
+  set_labels(vig_resp$apellido_vig,
+             labels = c("Spanish"=1,"Basque-Castilian"=2,"European"=3,"Indigenous"=4))
+vig_resp$edad_vig <-
+  set_labels(vig_resp$edad_vig,
+             labels = c("35 years"=1,"45 years"=2,"55 years"=3))
+vig_resp$nse_ori_vig<- 
+  set_labels(vig_resp$nse_ori_vig,labels = c("Public"=1,"Charter"=2,"Private"=3))
+vig_resp$educ_vig <-
+  set_labels(vig_resp$educ_vig,
+             labels = c("Complete basic education"=1,
+                        "Complete secondary education"=2,
+                        "Technical professional education"=3,
+                        "Full university education"=4,
+                        "Graduate Studies"=5))
+vig_resp$necesidades_vig<- 
+  set_labels(vig_resp$necesidades_vig,labels = c(
+    "Do not have children" = 1,
+    "Has 1 child" = 2,
+    "Has 2 children" = 3,
+    "Has 5 children" = 4))
+vig_resp$educ_madre_vig <- 
+  set_labels(vig_resp$educ_madre_vig ,labels = c(
+    "Complete basic education" = 1,
+    "Complete secondary education" = 2,
+    "Technical professional education" = 3,
+    "Full university education" = 4,
+    "Graduate Studies" = 5
+  ))
+vig_resp$ingresos_vig <- 
+  set_labels(vig_resp$ingresos_vig,
+             labels = c("$320.500"=1,"$655.000"=2,"$1.200.000"=3,
+                        "$2.500.000"=4,"$4.300.000"=5))
+
+
+vig_resp$sexo_vig <- to_factor(vig_resp$sexo_vig, labels = c("Male" = 1, "Female" = 2))
+vig_resp$apellido_vig <- to_factor(vig_resp$apellido_vig, labels = c("Spanish" = 1, "Basque-Castilian" = 2, "European" = 3, "Indigenous" = 4))
+vig_resp$edad_vig <- to_factor(vig_resp$edad_vig, labels = c("35 years" = 1, "45 years" = 2, "55 years" = 3))
+vig_resp$nse_ori_vig <- to_factor(vig_resp$nse_ori_vig, labels = c("Public" = 1, "Charter" = 2, "Private" = 3))
+vig_resp$educ_vig <- to_factor(vig_resp$educ_vig, labels = c("Complete basic education" = 1, "Complete secondary education" = 2, "Technical professional education" = 3, "Full university education" = 4, "Graduate Studies" = 5))
+vig_resp$necesidades_vig <- to_factor(vig_resp$necesidades_vig, labels = c("Do not have children" = 1, "Has 1 child" = 2, "Has 2 children" = 3, "Has 5 children" = 4))
+vig_resp$educ_madre_vig <- to_factor(vig_resp$educ_madre_vig, labels = c("Complete basic education" = 1, "Complete secondary education" = 2, "Technical professional education" = 3, "Full university education" = 4, "Graduate Studies" = 5))
+vig_resp$ingresos_vig <- to_factor(vig_resp$ingresos_vig, labels = c("$320,500" = 1, "$655,000" = 2, "$1,200,000" = 3, "$2,500,000" = 4, "$4,300,000" = 5))
+```
+
+```{r respondent}
+vig_resp$sexo_re <- set_labels(x = vig_resp$sexo_re, 
+                               labels = c("Man"=1,"Woman"=2))
+vig_resp$sexo_re <- factor(vig_resp$sexo_re,levels = c(1,2),labels = c("Male","Female"))
+
+
+
+vig_resp$educ_re <- set_labels(x = vig_resp$educ_re,labels = 
+                                 c("No formal education"=1,
+                                  "Primary education incomplete"=2,
+                                  "Complete primary education"=3,
+                                  "Incomplete secondary education"=4,
+                                  "Complete secondary education"=5,
+                                  "Non-university higher education incomplete"=6,
+                                  "Complete non-university higher education"=7,
+                                  "Incomplete college education"=8,
+                                  "Complete college education"=9,
+                                  "Postgraduate studies, master's, doctoral"=10)) 
+
+vig_resp$estlab_re <-
+  set_labels(vig_resp$estlab_re,labels = c(
+  "Working for pay full-time" = 1,
+  "Working for pay part-time or do odd jobs" = 2,
+  "Study and work" = 3,
+  "Just study" = 4,
+  "Retired or pensioned" = 5,
+  "Unemployed, looking for work" = 6,
+  "Performs unpaid work (household chores, babysitting and others)" = 7,
+  "It is ill or has a disability" = 8,
+  "Not studying, not working and not looking for work" = 9))
+
+
+vig_resp$ingresos_re <- 
+  set_labels(vig_resp$ingresos_re,
+             labels = 
+               c("Less than $35.000 monthly disposable income" = 1 ,
+                 "From $35.001  to $56.000 monthly disposable income" = 2 ,
+                 "From $56.001  to $78.000 monthly disposable income" = 3 ,
+                 "From $78.001  to $101.000 monthly disposable income" = 4 ,
+                 "From $101.001 to $134.000 monthly disposable income" = 5 ,
+                 "From $134.001 to $179.000 monthly disposable income" = 6 ,
+                 "From $179.001 to $224.000 monthly disposable income" = 7 ,
+                 "From $224.001 to $291.000 monthly disposable income" = 8 ,
+                 "From $291.001 to $358.000 monthly disposable income" = 9 ,
+                 "From $358.001 to $448.000 monthly disposable income" = 10,
+                 "From $448.001 to $1.000.000 monthly disposable incomes" = 11,
+                 "From $1.000.001 to $2.000.000 monthly disposable income" = 12,
+                 "From $2.000.001 to $3.000.000 monthly disposable income" = 13,
+                 "More than $3.000.000 monthly disposable income" = 14))
+```
+
+- Recode variables
+
+```{r}
+# Household income
+sjmisc::frq(vig_resp$pophome)
+sjmisc::frq(vig_resp$ingresos_re)
+vig_resp$hhincome <-
+  car::recode(vig_resp$ingresos_re,
+              recodes ="1=35000;2=45500.5;3=67000.5;4=89500.5;5=117500.5;
+              6=156500.5;7=201500.5;8=257500.5;9=324500.5;10=403000.5;
+              11=724000.5;12=1500001;13=2500001;14=3000000")
+vig_resp$hhincome <- as.numeric(vig_resp$hhincome)
+
+sjmisc::frq(vig_resp$hhincome)
+vig_resp$income5 <- ntile(vig_resp$hhincome,n = 5)
+sjmisc::frq(vig_resp$income5)
+vig_resp$income5[is.na(vig_resp$income5)] <- 6
+vig_resp$income5 <- factor(vig_resp$income5,levels = c(1,2,3,4,5,6),
+                           labels = c("Quintile 1","Quintile 2","Quintile 3",
+                                      "Quintile 4","Quintile 5","No income/Missing"))
+set_label(vig_resp$income5) <- "Household income quintile (respondent level)"
+sjmisc::frq(vig_resp$income5)
+# Educational levele
+
+sjmisc::frq(vig_resp$educ_re) 
+vig_resp$educ <- car::recode(vig_resp$educ_re,
+                             recodes = "c(1,2,3)=1;4:5=2;6:7=3;c(8,9,10)=4",as.factor = T,
+                             levels = c(1,2,3,4))
+
+vig_resp$educ <- factor(x =vig_resp$educ ,
+                        labels =  c("Primary or less","High school",
+                                    "Technical","Universitary"))
+
+set_label(vig_resp$educ) <- get_label(vig_resp$educ_re) 
+sjmisc::frq(vig_resp$educ) 
+```
+
+-save database
+
+```{r}
+vig_respw02 <-vig_resp 
+view_df(vig_respw02,show.type = T)
+skimr::skim(vig_respw02)
+vig_respw02<- vig_respw02[which(vig_respw02$folio_encuestado_1!=""),]
+save(vig_respw02,file = "input/data/proc/vig_respw02.RData")
+```
+
